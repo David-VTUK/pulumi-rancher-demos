@@ -1,0 +1,12 @@
+config:
+  Rancher-Demo-Env:downstreamClusterEC2Size: t2.xlarge
+  Rancher-Demo-Env:fleetClustersEC2Size: t2.medium
+  Rancher-Demo-Env:installDownstreamCluster: "true"
+  Rancher-Demo-Env:installCIS: "true"
+  Rancher-Demo-Env:installFleetClusters: "true"
+  Rancher-Demo-Env:installIstio: "true"
+  Rancher-Demo-Env:installLogging: "true"
+  Rancher-Demo-Env:installLonghorn: "true"
+  Rancher-Demo-Env:installMonitoring: "true"
+  Rancher-Demo-Env:installOPA: "true"
+  aws:region: eu-west-2
