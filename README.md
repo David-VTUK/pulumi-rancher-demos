@@ -11,6 +11,7 @@ Repo for generating Rancher Kubernetes cluster environments on AWS. Includes the
 * Rancher Node Templates
 * Rancher Demo cluster (3x nodes, RKE)
 * Rancher Fleet clusters (3 clusters, each with 1 node, based on k3s)
+  * This is accomplished by creating `imported` clusters in Rancher, extracting the join command and package it as cloud-init data for the EC2 instances to run after running `k3s`
 
 
 ![img.png](images/architecture.png)

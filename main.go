@@ -77,6 +77,10 @@ func main() {
 			State: &azState,
 		})
 
+		if err != nil {
+			return err
+		}
+
 		//How many AZ's to spread nodes across. Default to 3.
 		zoneNumber := 3
 		zones := []string{"a", "b", "c"}
