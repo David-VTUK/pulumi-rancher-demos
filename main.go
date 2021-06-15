@@ -21,6 +21,7 @@ func main() {
 		installFleetClusters := conf.GetBool("installFleetClusters")
 		downstreamClusterEC2Size := conf.Get("downstreamClusterEC2Size")
 		fleetClustersEC2Size := conf.Get("fleetClustersEC2Size")
+		installStandaloneK3sClusters := conf.GetBool("installStandaloneK3sClusters")
 
 		// Create AWS VPC
 		vpc, err := ec2.NewVpc(ctx, "david-pulumi-vpc", &ec2.VpcArgs{
@@ -331,6 +332,26 @@ func main() {
 				}
 			}
 
+		}
+
+		var k3sNodeList []*ec2.Instance
+
+		if installStandaloneK3sClusters {
+
+			for i := 0; i < 4; i++ {
+				k3snode, err := ec2.NewInstance(ctx, "david-k3s-node-"+strconv.Itoa(i), &ec2.InstanceArgs{
+					Ami:                 pulumi.String("ami-0ff4c8fb495a5a50d"),
+					InstanceType:        pulumi.String(fleetClustersEC2Size),
+					KeyName:             pulumi.String("davidh-keypair"),
+					VpcSecurityGroupIds: pulumi.StringArray{sg.ID()},
+					SubnetId:            subnets[2].ID(),
+				})
+
+				k3sNodeList = append(k3sNodeList, k3snode)
+				if err != nil {
+					return err
+				}
+			}
 		}
 
 		// End return
