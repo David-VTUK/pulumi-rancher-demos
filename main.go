@@ -321,6 +321,7 @@ func main() {
 				_, err = ec2.NewInstance(ctx, "david-pulumi-fleet-node-"+strconv.Itoa(i), &ec2.InstanceArgs{
 					Ami:                 pulumi.String("ami-0ff4c8fb495a5a50d"),
 					InstanceType:        pulumi.String(fleetClustersEC2Size),
+					Tags:                pulumi.StringMap{"Name": pulumi.String("david-pulumi-fleet-node-" + strconv.Itoa(i))},
 					KeyName:             pulumi.String("davidh-keypair"),
 					VpcSecurityGroupIds: pulumi.StringArray{sg.ID()},
 					UserData:            joincommand,
@@ -343,6 +344,7 @@ func main() {
 					Ami:                 pulumi.String("ami-0ff4c8fb495a5a50d"),
 					InstanceType:        pulumi.String(fleetClustersEC2Size),
 					KeyName:             pulumi.String("davidh-keypair"),
+					Tags:                pulumi.StringMap{"Name": pulumi.String("david-k3s-node-" + strconv.Itoa(i))},
 					VpcSecurityGroupIds: pulumi.StringArray{sg.ID()},
 					SubnetId:            subnets[2].ID(),
 				})
@@ -352,6 +354,10 @@ func main() {
 					return err
 				}
 			}
+		}
+
+		for k, v := range k3sNodeList {
+			ctx.Export("ip"+strconv.Itoa(k), v.PublicIp)
 		}
 
 		// End return
