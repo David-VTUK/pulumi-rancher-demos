@@ -218,28 +218,31 @@ func main() {
 			installLonghorn := conf.GetBool("installLonghorn")
 			installMonitoring := conf.GetBool("installMonitoring")
 
-			if installIstio {
-				_, err := rancher2.NewAppV2(ctx, "istio", &rancher2.AppV2Args{
-					ChartName:    pulumi.String("rancher-istio"),
-					ClusterId:    cluster.ID(),
-					Namespace:    pulumi.String("istio-system"),
-					RepoName:     pulumi.String("rancher-charts"),
-					ChartVersion: pulumi.String("1.8.300"),
+			// Need to handle if OPA and Istio are installed with Monitoring, if so
+			// influence the order so that monitoring is always first, followed
+			// by the other two, otherwise it will fail - both OPA and Istio "look"
+			// for Prometheus/Grafana as part of the install, if Monitoring is being installed
+			// at the same time then errors will occur
+
+			if installIstio && installMonitoring == false {
+				_, err := rancher2.NewAppV2(ctx, "istio-standalone", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-istio"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("istio-system"),
+					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
 
 				if err != nil {
 					return err
 				}
-
 			}
 
-			if installOPA {
-				_, err = rancher2.NewAppV2(ctx, "opa", &rancher2.AppV2Args{
-					ChartName:    pulumi.String("rancher-gatekeeper"),
-					ClusterId:    cluster.ID(),
-					Namespace:    pulumi.String("opa-system"),
-					RepoName:     pulumi.String("rancher-charts"),
-					ChartVersion: pulumi.String("3.3.000"),
+			if installOPA && installMonitoring == false {
+				_, err = rancher2.NewAppV2(ctx, "opa-standalone", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-gatekeeper"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("opa-system"),
+					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
 
 				if err != nil {
@@ -249,11 +252,10 @@ func main() {
 
 			if installCIS {
 				_, err = rancher2.NewAppV2(ctx, "cis", &rancher2.AppV2Args{
-					ChartName:    pulumi.String("rancher-cis-benchmark"),
-					ClusterId:    cluster.ID(),
-					Namespace:    pulumi.String("cis-system"),
-					RepoName:     pulumi.String("rancher-charts"),
-					ChartVersion: pulumi.String("1.0.301"),
+					ChartName: pulumi.String("rancher-cis-benchmark"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("cis-system"),
+					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
 
 				if err != nil {
@@ -263,11 +265,10 @@ func main() {
 
 			if installLogging {
 				_, err = rancher2.NewAppV2(ctx, "logging", &rancher2.AppV2Args{
-					ChartName:    pulumi.String("rancher-logging"),
-					ClusterId:    cluster.ID(),
-					Namespace:    pulumi.String("cattle-logging-system"),
-					RepoName:     pulumi.String("rancher-charts"),
-					ChartVersion: pulumi.String("3.9.000"),
+					ChartName: pulumi.String("rancher-logging"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("cattle-logging-system"),
+					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
 
 				if err != nil {
@@ -277,11 +278,10 @@ func main() {
 
 			if installLonghorn {
 				_, err = rancher2.NewAppV2(ctx, "longhorn", &rancher2.AppV2Args{
-					ChartName:    pulumi.String("longhorn"),
-					ClusterId:    cluster.ID(),
-					Namespace:    pulumi.String("longhorn-system"),
-					RepoName:     pulumi.String("rancher-charts"),
-					ChartVersion: pulumi.String("1.1.001"),
+					ChartName: pulumi.String("longhorn"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("longhorn-system"),
+					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
 
 				if err != nil {
@@ -289,19 +289,107 @@ func main() {
 				}
 			}
 
-			if installMonitoring {
-				_, err := rancher2.NewAppV2(ctx, "monitoring", &rancher2.AppV2Args{
-					ChartName:    pulumi.String("rancher-monitoring"),
-					ClusterId:    cluster.ID(),
-					Namespace:    pulumi.String("cattle-monitoring-system"),
-					RepoName:     pulumi.String("rancher-charts"),
-					ChartVersion: pulumi.String("9.4.203"),
+			if installMonitoring && installOPA == false && installIstio == false {
+				_, err := rancher2.NewAppV2(ctx, "monitoring-standalone", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-monitoring"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("cattle-monitoring-system"),
+					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
 
 				if err != nil {
 					return err
 				}
 			}
+
+			if installMonitoring && installOPA == true && installIstio == false {
+				monitoring, err := rancher2.NewAppV2(ctx, "monitoring-with-opa", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-monitoring"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("cattle-monitoring-system"),
+					RepoName:  pulumi.String("rancher-charts"),
+					//ChartVersion: pulumi.String("9.4.203"),
+				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
+
+				if err != nil {
+					return err
+				}
+
+				_, err = rancher2.NewAppV2(ctx, "opa", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-gatekeeper"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("opa-system"),
+					RepoName:  pulumi.String("rancher-charts"),
+				}, pulumi.DependsOn([]pulumi.Resource{clusterSync, monitoring}))
+
+				if err != nil {
+					return err
+				}
+			}
+
+			if installMonitoring && installOPA == false && installIstio == true {
+				monitoring, err := rancher2.NewAppV2(ctx, "monitoring-with-istio", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-monitoring"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("cattle-monitoring-system"),
+					RepoName:  pulumi.String("rancher-charts"),
+					//ChartVersion: pulumi.String("9.4.203"),
+				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
+
+				if err != nil {
+					return err
+				}
+
+				_, err = rancher2.NewAppV2(ctx, "istio", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-istio"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("istio-system"),
+					RepoName:  pulumi.String("rancher-charts"),
+					//ChartVersion: pulumi.String("1.8.300"),
+				}, pulumi.DependsOn([]pulumi.Resource{clusterSync, monitoring}))
+
+				if err != nil {
+					return err
+				}
+			}
+
+			if installMonitoring && installOPA == true && installIstio == true {
+				monitoring, err := rancher2.NewAppV2(ctx, "monitoring-with-istio-and-opa", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-monitoring"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("cattle-monitoring-system"),
+					RepoName:  pulumi.String("rancher-charts"),
+				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
+
+				if err != nil {
+					return err
+				}
+
+				_, err = rancher2.NewAppV2(ctx, "istio", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-istio"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("istio-system"),
+					RepoName:  pulumi.String("rancher-charts"),
+					//ChartVersion: pulumi.String("1.8.300"),
+				}, pulumi.DependsOn([]pulumi.Resource{clusterSync, monitoring}))
+
+				if err != nil {
+					return err
+				}
+
+				_, err = rancher2.NewAppV2(ctx, "opa", &rancher2.AppV2Args{
+					ChartName: pulumi.String("rancher-gatekeeper"),
+					ClusterId: cluster.ID(),
+					Namespace: pulumi.String("opa-system"),
+					RepoName:  pulumi.String("rancher-charts"),
+				}, pulumi.DependsOn([]pulumi.Resource{clusterSync, monitoring}))
+
+				if err != nil {
+					return err
+				}
+
+			}
+
 		}
 
 		if installFleetClusters {
