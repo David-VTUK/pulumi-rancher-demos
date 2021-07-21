@@ -247,6 +247,10 @@ func main() {
 						Namespace: pulumi.String("opa-system"),
 						RepoName:  pulumi.String("rancher-charts"),
 					}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
+
+					if err != nil {
+						return err
+					}
 				}
 			}
 
@@ -264,7 +268,6 @@ func main() {
 				}
 
 				if installIstio {
-
 					_, err = rancher2.NewAppV2(ctx, "istio-with-monitoring", &rancher2.AppV2Args{
 						ChartName: pulumi.String("rancher-istio"),
 						ClusterId: cluster.ID(),
@@ -273,6 +276,9 @@ func main() {
 						//ChartVersion: pulumi.String("1.8.300"),
 					}, pulumi.DependsOn([]pulumi.Resource{clusterSync, monitoring}))
 
+					if err != nil {
+						return err
+					}
 				}
 
 				if installOPA {
@@ -283,6 +289,9 @@ func main() {
 						RepoName:  pulumi.String("rancher-charts"),
 					}, pulumi.DependsOn([]pulumi.Resource{clusterSync, monitoring}))
 
+					if err != nil {
+						return err
+					}
 				}
 			}
 
