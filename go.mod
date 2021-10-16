@@ -3,6 +3,7 @@ module Rancher-Demo-Env
 go 1.14
 
 require (
+	github.com/HdrHistogram/hdrhistogram-go v1.1.2 // indirect
 	github.com/Microsoft/go-winio v0.5.0 // indirect
 	github.com/cheggaaa/pb v1.0.29 // indirect
 	github.com/djherbis/times v1.5.0 // indirect

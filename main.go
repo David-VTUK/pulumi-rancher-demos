@@ -184,10 +184,11 @@ func main() {
 
 			for i := 0; i < zoneNumber; i++ {
 				nodepool, err := rancher2.NewNodePool(ctx, "david-pulumi-nodepool-"+strconv.Itoa(i), &rancher2.NodePoolArgs{
-					ClusterId:      cluster.ID(),
-					ControlPlane:   pulumi.Bool(true),
-					Etcd:           pulumi.Bool(true),
-					HostnamePrefix: pulumi.String("david-pulumi-node-"),
+					ClusterId:    cluster.ID(),
+					ControlPlane: pulumi.Bool(true),
+					Etcd:         pulumi.Bool(true),
+					//HostnamePrefix: pulumi.String("david-pulumi-node-"),
+					HostnamePrefix: pulumi.String(fmt.Sprintf("david-pulumi-node-%s-", strconv.Itoa(i))),
 					Name:           pulumi.String("david-pulumi-pool-" + strconv.Itoa(i)),
 					Quantity:       pulumi.Int(1),
 					Worker:         pulumi.Bool(true),
@@ -345,8 +346,10 @@ func main() {
 
 				joincommand := cluster.ClusterRegistrationToken.Command().ApplyT(func(command *string) string {
 					getPublicIP := "IP=$(curl -H \"X-aws-ec2-metadata-token: $TOKEN\" -v http://169.254.169.254/latest/meta-data/public-ipv4)"
-					installK3s := "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.19.5+k3s2 INSTALL_K3S_EXEC=\"--node-external-ip $IP\" sh -"
+					installK3s := "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.21.4+k3s1 INSTALL_K3S_EXEC=\"--node-external-ip $IP\" sh -"
 					nodecommand := fmt.Sprintf("#!/bin/bash\n%s\n%s\n%s", getPublicIP, installK3s, *command)
+
+					ctx.Log.Info(fmt.Sprintf("%s%s", "joincommand:", *command), nil)
 					return nodecommand
 				}).(pulumi.StringOutput)
 
