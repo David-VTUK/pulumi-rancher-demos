@@ -23,6 +23,18 @@ func main() {
 		fleetClustersEC2Size := conf.Get("fleetClustersEC2Size")
 		installStandaloneK3sClusters := conf.GetBool("installStandaloneK3sClusters")
 
+		cloudcredential, err := rancher2.NewCloudCredential(ctx, "david-pulumi-cloudcredential", &rancher2.CloudCredentialArgs{
+			Name:        pulumi.String("david-pulumi-aws"),
+			Description: pulumi.String("AWS credentials"),
+			Amazonec2CredentialConfig: &rancher2.CloudCredentialAmazonec2CredentialConfigArgs{
+				AccessKey: ec2AccessKey,
+				SecretKey: ec2SecretKey,
+			}})
+
+		if err != nil {
+			return err
+		}
+
 		// Create AWS VPC
 		vpc, err := ec2.NewVpc(ctx, "david-pulumi-vpc", &ec2.VpcArgs{
 			CidrBlock:          pulumi.String("10.0.0.0/16"),
@@ -122,18 +134,6 @@ func main() {
 
 		// Create a downstream RKE cluster in Rancher
 		if createDownstreamCluster {
-			// Create AWS Cloud Credential
-			cloudcredential, err := rancher2.NewCloudCredential(ctx, "david-pulumi-cloudcredential", &rancher2.CloudCredentialArgs{
-				Name:        pulumi.String("david-pulumi-aws"),
-				Description: pulumi.String("AWS credentials"),
-				Amazonec2CredentialConfig: &rancher2.CloudCredentialAmazonec2CredentialConfigArgs{
-					AccessKey: ec2AccessKey,
-					SecretKey: ec2SecretKey,
-				}})
-
-			if err != nil {
-				return err
-			}
 
 			// Create a Node Template - one for each AZ
 			var nodetemplates []*rancher2.NodeTemplate
@@ -338,29 +338,44 @@ func main() {
 		}
 
 		if installFleetClusters {
+
 			// create some EC2 instances to install K3s on:
 			for i := 0; i < 3; i++ {
-				cluster, _ := rancher2.NewCluster(ctx, "david-pulumi-fleet-"+strconv.Itoa(i), &rancher2.ClusterArgs{
-					Name: pulumi.String("david-pulumi-fleet-" + strconv.Itoa(i)),
+
+				machineConfig, err := rancher2.NewMachineConfigV2(ctx, "david-pulumi-fleet-machineconf-"+strconv.Itoa(i), &rancher2.MachineConfigV2Args{
+					GenerateName: pulumi.String("david-pulumi-fleet-machineconf-" + strconv.Itoa(i)),
+					Amazonec2Config: &rancher2.MachineConfigV2Amazonec2ConfigArgs{
+						Ami:            pulumi.String("ami-0ff4c8fb495a5a50d"),
+						InstanceType:   pulumi.String(downstreamClusterEC2Size),
+						Region:         pulumi.String("eu-west-2"),
+						SecurityGroups: pulumi.StringArray{sg.Name},
+						SubnetId:       subnets[i].ID(),
+						VpcId:          vpc.ID(),
+						Zone:           pulumi.String(zones[i]),
+					},
 				})
 
-				joincommand := cluster.ClusterRegistrationToken.Command().ApplyT(func(command *string) string {
-					getPublicIP := "IP=$(curl -H \"X-aws-ec2-metadata-token: $TOKEN\" -v http://169.254.169.254/latest/meta-data/public-ipv4)"
-					installK3s := "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.21.4+k3s1 INSTALL_K3S_EXEC=\"--node-external-ip $IP\" sh -"
-					nodecommand := fmt.Sprintf("#!/bin/bash\n%s\n%s\n%s", getPublicIP, installK3s, *command)
-
-					ctx.Log.Info(fmt.Sprintf("%s%s", "joincommand:", *command), nil)
-					return nodecommand
-				}).(pulumi.StringOutput)
-
-				_, err = ec2.NewInstance(ctx, "david-pulumi-fleet-node-"+strconv.Itoa(i), &ec2.InstanceArgs{
-					Ami:                 pulumi.String("ami-0ff4c8fb495a5a50d"),
-					InstanceType:        pulumi.String(fleetClustersEC2Size),
-					Tags:                pulumi.StringMap{"Name": pulumi.String("david-pulumi-fleet-node-" + strconv.Itoa(i))},
-					KeyName:             pulumi.String("davidh-keypair"),
-					VpcSecurityGroupIds: pulumi.StringArray{sg.ID()},
-					UserData:            joincommand,
-					SubnetId:            subnets[i].ID(),
+				_, err = rancher2.NewClusterV2(ctx, "davidh-pulumi-cluster-"+strconv.Itoa(i), &rancher2.ClusterV2Args{
+					CloudCredentialSecretName:           cloudcredential.Name,
+					KubernetesVersion:                   pulumi.String("v1.21.4+k3s1"),
+					Name:                                pulumi.String("david-pulumi-fleet-" + strconv.Itoa(i)),
+					DefaultClusterRoleForProjectMembers: pulumi.String("user"),
+					RkeConfig: &rancher2.ClusterV2RkeConfigArgs{
+						MachinePools: rancher2.ClusterV2RkeConfigMachinePoolArray{
+							&rancher2.ClusterV2RkeConfigMachinePoolArgs{
+								CloudCredentialSecretName: cloudcredential.Name,
+								ControlPlaneRole:          pulumi.Bool(true),
+								EtcdRole:                  pulumi.Bool(true),
+								Name:                      pulumi.String("aio"),
+								Quantity:                  pulumi.Int(3),
+								WorkerRole:                pulumi.Bool(true),
+								MachineConfig: &rancher2.ClusterV2RkeConfigMachinePoolMachineConfigArgs{
+									Kind: machineConfig.Kind,
+									Name: machineConfig.Name,
+								},
+							},
+						},
+					},
 				})
 
 				if err != nil {
@@ -381,7 +396,7 @@ func main() {
 					KeyName:             pulumi.String("davidh-keypair"),
 					Tags:                pulumi.StringMap{"Name": pulumi.String("david-k3s-node-" + strconv.Itoa(i))},
 					VpcSecurityGroupIds: pulumi.StringArray{sg.ID()},
-					SubnetId:            subnets[2].ID(),
+					SubnetId:            subnets[i].ID(),
 				})
 
 				k3sNodeList = append(k3sNodeList, k3snode)
