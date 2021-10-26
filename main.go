@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/pulumi/pulumi-aws/sdk/v4/go/aws"
 	"github.com/pulumi/pulumi-aws/sdk/v4/go/aws/ec2"
 	"github.com/pulumi/pulumi-rancher2/sdk/v3/go/rancher2"
@@ -21,7 +20,18 @@ func main() {
 		installFleetClusters := conf.GetBool("installFleetClusters")
 		downstreamClusterEC2Size := conf.Get("downstreamClusterEC2Size")
 		fleetClustersEC2Size := conf.Get("fleetClustersEC2Size")
-		installStandaloneK3sClusters := conf.GetBool("installStandaloneK3sClusters")
+
+		cloudcredential, err := rancher2.NewCloudCredential(ctx, "david-pulumi-cloudcredential", &rancher2.CloudCredentialArgs{
+			Name:        pulumi.String("david-pulumi-aws"),
+			Description: pulumi.String("AWS credentials"),
+			Amazonec2CredentialConfig: &rancher2.CloudCredentialAmazonec2CredentialConfigArgs{
+				AccessKey: ec2AccessKey,
+				SecretKey: ec2SecretKey,
+			}})
+
+		if err != nil {
+			return err
+		}
 
 		// Create AWS VPC
 		vpc, err := ec2.NewVpc(ctx, "david-pulumi-vpc", &ec2.VpcArgs{
@@ -122,37 +132,23 @@ func main() {
 
 		// Create a downstream RKE cluster in Rancher
 		if createDownstreamCluster {
-			// Create AWS Cloud Credential
-			cloudcredential, err := rancher2.NewCloudCredential(ctx, "david-pulumi-cloudcredential", &rancher2.CloudCredentialArgs{
-				Name:        pulumi.String("david-pulumi-aws"),
-				Description: pulumi.String("AWS credentials"),
-				Amazonec2CredentialConfig: &rancher2.CloudCredentialAmazonec2CredentialConfigArgs{
-					AccessKey: ec2AccessKey,
-					SecretKey: ec2SecretKey,
-				}})
 
-			if err != nil {
-				return err
-			}
+			var machineConfigs []*rancher2.MachineConfigV2
+			var machinePools []*rancher2.ClusterV2RkeConfigMachinePoolArgs
 
-			// Create a Node Template - one for each AZ
-			var nodetemplates []*rancher2.NodeTemplate
+			for i := 0; i < 3; i++ {
 
-			for i := 0; i < zoneNumber; i++ {
-				nodetemplate, err := rancher2.NewNodeTemplate(ctx, "david-pulumi-nodetemplate-"+zoneList.Names[i], &rancher2.NodeTemplateArgs{
-					CloudCredentialId: cloudcredential.ID(),
-					Description:       pulumi.String("node template for ec2"),
-					Name:              pulumi.String("david-pulumi-nodetemplate-" + zones[i]),
-					EngineInstallUrl:  pulumi.String("https://releases.rancher.com/install-docker/19.03.sh"),
-
-					Amazonec2Config: &rancher2.NodeTemplateAmazonec2ConfigArgs{
+				machineConfig, err := rancher2.NewMachineConfigV2(ctx, "david-pulumi-downstream-"+strconv.Itoa(i), &rancher2.MachineConfigV2Args{
+					GenerateName: pulumi.String("david-pulumi-machineconf-downstream-" + strconv.Itoa(i)),
+					Amazonec2Config: &rancher2.MachineConfigV2Amazonec2ConfigArgs{
 						Ami:            pulumi.String("ami-0ff4c8fb495a5a50d"),
 						InstanceType:   pulumi.String(downstreamClusterEC2Size),
-						VpcId:          vpc.ID(),
-						RootSize:       pulumi.String("50"),
-						SecurityGroups: pulumi.StringArray{sg.Name},
 						Region:         pulumi.String("eu-west-2"),
+						SecurityGroups: pulumi.StringArray{sg.Name},
+						SubnetId:       subnets[i].ID(),
+						VpcId:          vpc.ID(),
 						Zone:           pulumi.String(zones[i]),
+						RootSize:       pulumi.String("50"),
 					},
 				})
 
@@ -160,51 +156,42 @@ func main() {
 					return err
 				}
 
-				nodetemplates = append(nodetemplates, nodetemplate)
+				machineConfigs = append(machineConfigs, machineConfig)
+
+				machinePool := &rancher2.ClusterV2RkeConfigMachinePoolArgs{
+					CloudCredentialSecretName: cloudcredential.ID(),
+					ControlPlaneRole:          pulumi.Bool(true),
+					EtcdRole:                  pulumi.Bool(true),
+					Name:                      pulumi.String("aio" + strconv.Itoa(i)),
+					Quantity:                  pulumi.Int(1),
+					WorkerRole:                pulumi.Bool(true),
+					MachineConfig: &rancher2.ClusterV2RkeConfigMachinePoolMachineConfigArgs{
+						Kind: machineConfigs[i].Kind,
+						Name: machineConfigs[i].Name,
+					},
+				}
+
+				machinePools = append(machinePools, machinePool)
 			}
 
-			// Create Cluster
-			cluster, err := rancher2.NewCluster(ctx, "david-pulumi-cluster", &rancher2.ClusterArgs{
-				Description: pulumi.String("Cluster created by Pulumi"),
-				Driver:      pulumi.String("rancherKubernetesEngine"),
-				Name:        pulumi.String("david-pulumi-cluster"),
-				RkeConfig: &rancher2.ClusterRkeConfigArgs{
-					Network: &rancher2.ClusterRkeConfigNetworkArgs{
-						Plugin: pulumi.String("canal"),
+			cluster, err := rancher2.NewClusterV2(ctx, "davidh-pulumi-cluster-downstream", &rancher2.ClusterV2Args{
+				CloudCredentialSecretName:           cloudcredential.ID(),
+				KubernetesVersion:                   pulumi.String("v1.21.5+rke2r2"),
+				Name:                                pulumi.String("david-pulumi-downstream"),
+				DefaultClusterRoleForProjectMembers: pulumi.String("user"),
+				RkeConfig: &rancher2.ClusterV2RkeConfigArgs{
+					MachinePools: rancher2.ClusterV2RkeConfigMachinePoolArray{
+						machinePools[0],
+						machinePools[1],
+						machinePools[2],
 					},
 				},
-			}, pulumi.DependsOn([]pulumi.Resource{nodetemplates[0], nodetemplates[1], nodetemplates[2]}))
-
-			if err != nil {
-				return err
-			}
-
-			// Create nodepools to match to each region
-			var nodepools []*rancher2.NodePool
-
-			for i := 0; i < zoneNumber; i++ {
-				nodepool, err := rancher2.NewNodePool(ctx, "david-pulumi-nodepool-"+strconv.Itoa(i), &rancher2.NodePoolArgs{
-					ClusterId:    cluster.ID(),
-					ControlPlane: pulumi.Bool(true),
-					Etcd:         pulumi.Bool(true),
-					//HostnamePrefix: pulumi.String("david-pulumi-node-"),
-					HostnamePrefix: pulumi.String(fmt.Sprintf("david-pulumi-node-%s-", strconv.Itoa(i))),
-					Name:           pulumi.String("david-pulumi-pool-" + strconv.Itoa(i)),
-					Quantity:       pulumi.Int(1),
-					Worker:         pulumi.Bool(true),
-					NodeTemplateId: nodetemplates[i].ID(),
-				})
-				if err != nil {
-					return err
-				}
-				nodepools = append(nodepools, nodepool)
-
-			}
+			})
 
 			// Required to help sync objects
 			clusterSync, err := rancher2.NewClusterSync(ctx, "david-clustersync", &rancher2.ClusterSyncArgs{
-				ClusterId:   cluster.ID(),
-				NodePoolIds: pulumi.StringArray{nodepools[0].ID(), nodepools[1].ID(), nodepools[2].ID()},
+				ClusterId:    cluster.ClusterV1Id,
+				WaitCatalogs: pulumi.Bool(true),
 				// Wait a couple of minutes for the cluster to be up before installing addons.
 				// This is because, sometimes, it takes a while for the catalog repos to install/be refreshed
 				// as part of the cluster standup
@@ -231,7 +218,7 @@ func main() {
 				if installIstio {
 					_, err := rancher2.NewAppV2(ctx, "istio-standalone", &rancher2.AppV2Args{
 						ChartName: pulumi.String("rancher-istio"),
-						ClusterId: cluster.ID(),
+						ClusterId: cluster.ClusterV1Id,
 						Namespace: pulumi.String("istio-system"),
 						RepoName:  pulumi.String("rancher-charts"),
 					}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
@@ -244,7 +231,7 @@ func main() {
 				if installOPA {
 					_, err = rancher2.NewAppV2(ctx, "opa-standalone", &rancher2.AppV2Args{
 						ChartName: pulumi.String("rancher-gatekeeper"),
-						ClusterId: cluster.ID(),
+						ClusterId: cluster.ClusterV1Id,
 						Namespace: pulumi.String("opa-system"),
 						RepoName:  pulumi.String("rancher-charts"),
 					}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
@@ -259,7 +246,7 @@ func main() {
 			if installMonitoring {
 				monitoring, err := rancher2.NewAppV2(ctx, "monitoring", &rancher2.AppV2Args{
 					ChartName: pulumi.String("rancher-monitoring"),
-					ClusterId: cluster.ID(),
+					ClusterId: cluster.ClusterV1Id,
 					Namespace: pulumi.String("cattle-monitoring-system"),
 					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
@@ -271,7 +258,7 @@ func main() {
 				if installIstio {
 					_, err = rancher2.NewAppV2(ctx, "istio-with-monitoring", &rancher2.AppV2Args{
 						ChartName: pulumi.String("rancher-istio"),
-						ClusterId: cluster.ID(),
+						ClusterId: cluster.ClusterV1Id,
 						Namespace: pulumi.String("istio-system"),
 						RepoName:  pulumi.String("rancher-charts"),
 						//ChartVersion: pulumi.String("1.8.300"),
@@ -285,7 +272,7 @@ func main() {
 				if installOPA {
 					_, err = rancher2.NewAppV2(ctx, "opa-with-monitoring", &rancher2.AppV2Args{
 						ChartName: pulumi.String("rancher-gatekeeper"),
-						ClusterId: cluster.ID(),
+						ClusterId: cluster.ClusterV1Id,
 						Namespace: pulumi.String("opa-system"),
 						RepoName:  pulumi.String("rancher-charts"),
 					}, pulumi.DependsOn([]pulumi.Resource{clusterSync, monitoring}))
@@ -299,7 +286,7 @@ func main() {
 			if installCIS {
 				_, err = rancher2.NewAppV2(ctx, "cis", &rancher2.AppV2Args{
 					ChartName: pulumi.String("rancher-cis-benchmark"),
-					ClusterId: cluster.ID(),
+					ClusterId: cluster.ClusterV1Id,
 					Namespace: pulumi.String("cis-system"),
 					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
@@ -312,7 +299,7 @@ func main() {
 			if installLogging {
 				_, err = rancher2.NewAppV2(ctx, "logging", &rancher2.AppV2Args{
 					ChartName: pulumi.String("rancher-logging"),
-					ClusterId: cluster.ID(),
+					ClusterId: cluster.ClusterV1Id,
 					Namespace: pulumi.String("cattle-logging-system"),
 					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
@@ -325,7 +312,7 @@ func main() {
 			if installLonghorn {
 				_, err = rancher2.NewAppV2(ctx, "longhorn", &rancher2.AppV2Args{
 					ChartName: pulumi.String("longhorn"),
-					ClusterId: cluster.ID(),
+					ClusterId: cluster.ClusterV1Id,
 					Namespace: pulumi.String("longhorn-system"),
 					RepoName:  pulumi.String("rancher-charts"),
 				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
@@ -338,29 +325,44 @@ func main() {
 		}
 
 		if installFleetClusters {
+
 			// create some EC2 instances to install K3s on:
 			for i := 0; i < 3; i++ {
-				cluster, _ := rancher2.NewCluster(ctx, "david-pulumi-fleet-"+strconv.Itoa(i), &rancher2.ClusterArgs{
-					Name: pulumi.String("david-pulumi-fleet-" + strconv.Itoa(i)),
+
+				machineConfig, err := rancher2.NewMachineConfigV2(ctx, "david-pulumi-fleet-machineconf-"+strconv.Itoa(i), &rancher2.MachineConfigV2Args{
+					GenerateName: pulumi.String("david-pulumi-fleet-machineconf-" + strconv.Itoa(i)),
+					Amazonec2Config: &rancher2.MachineConfigV2Amazonec2ConfigArgs{
+						Ami:            pulumi.String("ami-0ff4c8fb495a5a50d"),
+						InstanceType:   pulumi.String(fleetClustersEC2Size),
+						Region:         pulumi.String("eu-west-2"),
+						SecurityGroups: pulumi.StringArray{sg.Name},
+						SubnetId:       subnets[i].ID(),
+						VpcId:          vpc.ID(),
+						Zone:           pulumi.String(zones[i]),
+					},
 				})
 
-				joincommand := cluster.ClusterRegistrationToken.Command().ApplyT(func(command *string) string {
-					getPublicIP := "IP=$(curl -H \"X-aws-ec2-metadata-token: $TOKEN\" -v http://169.254.169.254/latest/meta-data/public-ipv4)"
-					installK3s := "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.21.4+k3s1 INSTALL_K3S_EXEC=\"--node-external-ip $IP\" sh -"
-					nodecommand := fmt.Sprintf("#!/bin/bash\n%s\n%s\n%s", getPublicIP, installK3s, *command)
-
-					ctx.Log.Info(fmt.Sprintf("%s%s", "joincommand:", *command), nil)
-					return nodecommand
-				}).(pulumi.StringOutput)
-
-				_, err = ec2.NewInstance(ctx, "david-pulumi-fleet-node-"+strconv.Itoa(i), &ec2.InstanceArgs{
-					Ami:                 pulumi.String("ami-0ff4c8fb495a5a50d"),
-					InstanceType:        pulumi.String(fleetClustersEC2Size),
-					Tags:                pulumi.StringMap{"Name": pulumi.String("david-pulumi-fleet-node-" + strconv.Itoa(i))},
-					KeyName:             pulumi.String("davidh-keypair"),
-					VpcSecurityGroupIds: pulumi.StringArray{sg.ID()},
-					UserData:            joincommand,
-					SubnetId:            subnets[i].ID(),
+				_, err = rancher2.NewClusterV2(ctx, "davidh-pulumi-cluster-"+strconv.Itoa(i), &rancher2.ClusterV2Args{
+					CloudCredentialSecretName:           cloudcredential.ID(),
+					KubernetesVersion:                   pulumi.String("v1.21.4+k3s1"),
+					Name:                                pulumi.String("david-pulumi-fleet-" + strconv.Itoa(i)),
+					DefaultClusterRoleForProjectMembers: pulumi.String("user"),
+					RkeConfig: &rancher2.ClusterV2RkeConfigArgs{
+						MachinePools: rancher2.ClusterV2RkeConfigMachinePoolArray{
+							&rancher2.ClusterV2RkeConfigMachinePoolArgs{
+								CloudCredentialSecretName: cloudcredential.ID(),
+								ControlPlaneRole:          pulumi.Bool(true),
+								EtcdRole:                  pulumi.Bool(true),
+								Name:                      pulumi.String("aio"),
+								Quantity:                  pulumi.Int(1),
+								WorkerRole:                pulumi.Bool(true),
+								MachineConfig: &rancher2.ClusterV2RkeConfigMachinePoolMachineConfigArgs{
+									Kind: machineConfig.Kind,
+									Name: machineConfig.Name,
+								},
+							},
+						},
+					},
 				})
 
 				if err != nil {
@@ -368,31 +370,6 @@ func main() {
 				}
 			}
 
-		}
-
-		var k3sNodeList []*ec2.Instance
-
-		if installStandaloneK3sClusters {
-
-			for i := 0; i < 4; i++ {
-				k3snode, err := ec2.NewInstance(ctx, "david-k3s-node-"+strconv.Itoa(i), &ec2.InstanceArgs{
-					Ami:                 pulumi.String("ami-0ff4c8fb495a5a50d"),
-					InstanceType:        pulumi.String(fleetClustersEC2Size),
-					KeyName:             pulumi.String("davidh-keypair"),
-					Tags:                pulumi.StringMap{"Name": pulumi.String("david-k3s-node-" + strconv.Itoa(i))},
-					VpcSecurityGroupIds: pulumi.StringArray{sg.ID()},
-					SubnetId:            subnets[2].ID(),
-				})
-
-				k3sNodeList = append(k3sNodeList, k3snode)
-				if err != nil {
-					return err
-				}
-			}
-		}
-
-		for k, v := range k3sNodeList {
-			ctx.Export("ip"+strconv.Itoa(k), v.PublicIp)
 		}
 
 		// End return
