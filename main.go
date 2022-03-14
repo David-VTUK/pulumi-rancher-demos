@@ -148,7 +148,7 @@ func main() {
 						SubnetId:       subnets[i].ID(),
 						VpcId:          vpc.ID(),
 						Zone:           pulumi.String(zones[i]),
-						RootSize:       pulumi.String("50"),
+						RootSize:       pulumi.String("80"),
 					},
 				})
 
