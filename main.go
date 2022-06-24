@@ -195,7 +195,7 @@ func main() {
 				// Wait a couple of minutes for the cluster to be up before installing addons.
 				// This is because, sometimes, it takes a while for the catalog repos to install/be refreshed
 				// as part of the cluster standup
-				StateConfirm: pulumi.Int(15),
+				StateConfirm: pulumi.Int(30),
 			})
 
 			// Decide which addons to install
