@@ -6,6 +6,7 @@ import (
 	"github.com/pulumi/pulumi-rancher2/sdk/v3/go/rancher2"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi/config"
+	"io/ioutil"
 	"strconv"
 )
 
@@ -20,6 +21,7 @@ func main() {
 		installFleetClusters := conf.GetBool("installFleetClusters")
 		downstreamClusterEC2Size := conf.Get("downstreamClusterEC2Size")
 		fleetClustersEC2Size := conf.Get("fleetClustersEC2Size")
+		downstreamClusterAMI := conf.Get("downstreamClusterAMI")
 
 		cloudcredential, err := rancher2.NewCloudCredential(ctx, "david-pulumi-cloudcredential", &rancher2.CloudCredentialArgs{
 			Name:        pulumi.String("david-pulumi-aws"),
@@ -141,7 +143,7 @@ func main() {
 				machineConfig, err := rancher2.NewMachineConfigV2(ctx, "david-pulumi-downstream-"+strconv.Itoa(i), &rancher2.MachineConfigV2Args{
 					GenerateName: pulumi.String("david-pulumi-machineconf-downstream-" + strconv.Itoa(i)),
 					Amazonec2Config: &rancher2.MachineConfigV2Amazonec2ConfigArgs{
-						Ami:            pulumi.String("ami-0ff4c8fb495a5a50d"),
+						Ami:            pulumi.String(downstreamClusterAMI),
 						InstanceType:   pulumi.String(downstreamClusterEC2Size),
 						Region:         pulumi.String("eu-west-2"),
 						SecurityGroups: pulumi.StringArray{sg.Name},
@@ -205,6 +207,7 @@ func main() {
 			installLogging := conf.GetBool("installLogging")
 			installLonghorn := conf.GetBool("installLonghorn")
 			installMonitoring := conf.GetBool("installMonitoring")
+			installNeuvector := conf.GetBool("installNeuvector")
 
 			// Need to handle if OPA and Istio are installed with Monitoring, if so
 			// influence the order so that monitoring is always first, followed
@@ -270,6 +273,7 @@ func main() {
 				}
 
 				if installOPA {
+
 					_, err = rancher2.NewAppV2(ctx, "opa-with-monitoring", &rancher2.AppV2Args{
 						ChartName: pulumi.String("rancher-gatekeeper"),
 						ClusterId: cluster.ClusterV1Id,
@@ -320,6 +324,22 @@ func main() {
 				if err != nil {
 					return err
 				}
+			}
+
+			if installNeuvector {
+				neuvectorConfig, err := ioutil.ReadFile("./assets/neuvector.yaml")
+				_, err = rancher2.NewAppV2(ctx, "neuvector", &rancher2.AppV2Args{
+					ChartName: pulumi.String("neuvector"),
+					ClusterId: cluster.ClusterV1Id,
+					RepoName:  pulumi.String("rancher-charts"),
+					Namespace: pulumi.String("cattle-neuvector-system"),
+					Values:    pulumi.String(neuvectorConfig),
+				}, pulumi.DependsOn([]pulumi.Resource{clusterSync}))
+
+				if err != nil {
+					return err
+				}
+
 			}
 
 		}

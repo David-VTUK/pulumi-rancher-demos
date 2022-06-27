@@ -1,0 +1,8 @@
+k3s:
+  enabled: true
+  runtimePath: /run/k3s/containerd/containerd.sock
+docker:
+  enabled: false
+global:
+  cattle:
+    url: https://demo-hosted.rancher.cloud/
