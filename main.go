@@ -22,6 +22,7 @@ func main() {
 		downstreamClusterEC2Size := conf.Get("downstreamClusterEC2Size")
 		fleetClustersEC2Size := conf.Get("fleetClustersEC2Size")
 		downstreamClusterAMI := conf.Get("downstreamClusterAMI")
+		downstreamClusterNodeCount := conf.GetInt("downstreamClusterNodeCount")
 
 		cloudcredential, err := rancher2.NewCloudCredential(ctx, "david-pulumi-cloudcredential", &rancher2.CloudCredentialArgs{
 			Name:        pulumi.String("david-pulumi-aws"),
@@ -95,7 +96,7 @@ func main() {
 		}
 
 		//How many AZ's to spread nodes across. Default to 3.
-		zoneNumber := 3
+		zoneNumber := downstreamClusterNodeCount
 		zones := []string{"a", "b", "c"}
 
 		var subnets []*ec2.Subnet
@@ -138,7 +139,7 @@ func main() {
 			var machineConfigs []*rancher2.MachineConfigV2
 			var machinePools []*rancher2.ClusterV2RkeConfigMachinePoolArgs
 
-			for i := 0; i < 3; i++ {
+			for i := 0; i < downstreamClusterNodeCount; i++ {
 
 				machineConfig, err := rancher2.NewMachineConfigV2(ctx, "david-pulumi-downstream-"+strconv.Itoa(i), &rancher2.MachineConfigV2Args{
 					GenerateName: pulumi.String("david-pulumi-machineconf-downstream-" + strconv.Itoa(i)),
@@ -178,7 +179,7 @@ func main() {
 
 			cluster, err := rancher2.NewClusterV2(ctx, "davidh-pulumi-cluster-downstream", &rancher2.ClusterV2Args{
 				CloudCredentialSecretName:           cloudcredential.ID(),
-				KubernetesVersion:                   pulumi.String("v1.21.5+rke2r2"),
+				KubernetesVersion:                   pulumi.String("v1.22.13+rke2r1"),
 				Name:                                pulumi.String("david-pulumi-downstream"),
 				DefaultClusterRoleForProjectMembers: pulumi.String("user"),
 				RkeConfig: &rancher2.ClusterV2RkeConfigArgs{
@@ -197,7 +198,7 @@ func main() {
 				// Wait a couple of minutes for the cluster to be up before installing addons.
 				// This is because, sometimes, it takes a while for the catalog repos to install/be refreshed
 				// as part of the cluster standup
-				StateConfirm: pulumi.Int(30),
+				StateConfirm: pulumi.Int(10),
 			})
 
 			// Decide which addons to install
@@ -364,7 +365,7 @@ func main() {
 
 				_, err = rancher2.NewClusterV2(ctx, "davidh-pulumi-cluster-"+strconv.Itoa(i), &rancher2.ClusterV2Args{
 					CloudCredentialSecretName:           cloudcredential.ID(),
-					KubernetesVersion:                   pulumi.String("v1.21.4+k3s1"),
+					KubernetesVersion:                   pulumi.String("v1.22.13+k3s1"),
 					Name:                                pulumi.String("david-pulumi-fleet-" + strconv.Itoa(i)),
 					DefaultClusterRoleForProjectMembers: pulumi.String("user"),
 					RkeConfig: &rancher2.ClusterV2RkeConfigArgs{
