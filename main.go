@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	pulumi.Run(func(ctx *pulumi.Context) error {
+	body := func(ctx *pulumi.Context) error {
 
 		// Extract config items
 		conf := config.New(ctx, "")
@@ -23,6 +23,7 @@ func main() {
 		fleetClustersEC2Size := conf.Get("fleetClustersEC2Size")
 		downstreamClusterAMI := conf.Get("downstreamClusterAMI")
 		downstreamClusterNodeCount := conf.GetInt("downstreamClusterNodeCount")
+		installDownstreamEKSCluster := conf.GetBool("installDownstreamEKSCluster")
 
 		cloudcredential, err := rancher2.NewCloudCredential(ctx, "david-pulumi-cloudcredential", &rancher2.CloudCredentialArgs{
 			Name:        pulumi.String("david-pulumi-aws"),
@@ -35,6 +36,8 @@ func main() {
 		if err != nil {
 			return err
 		}
+
+		// Create supporting infrastructure if required
 
 		// Create AWS VPC
 		vpc, err := ec2.NewVpc(ctx, "david-pulumi-vpc", &ec2.VpcArgs{
@@ -345,6 +348,32 @@ func main() {
 
 		}
 
+		if installDownstreamEKSCluster {
+
+			_, err = rancher2.NewCluster(ctx, "davidh-pulumi-eks-cluster-downstream", &rancher2.ClusterArgs{
+
+				Description: pulumi.String("Demo EKS Cluster"),
+				EksConfigV2: &rancher2.ClusterEksConfigV2Args{
+					CloudCredentialId: cloudcredential.ID(),
+					KubernetesVersion: pulumi.String("1.24"),
+					Subnets:           pulumi.StringArray{subnets[0].ID(), subnets[1].ID(), subnets[2].ID()},
+
+					NodeGroups: rancher2.ClusterEksConfigV2NodeGroupArray{
+						rancher2.ClusterEksConfigV2NodeGroupArgs{
+							DesiredSize:  pulumi.Int(2),
+							InstanceType: pulumi.String("t3.medium"),
+							MaxSize:      pulumi.Int(3),
+							Name:         pulumi.String("davidh-pulumi-eks-cluster-downstream-nodegroup"),
+						},
+					},
+					PrivateAccess: pulumi.Bool(false),
+					PublicAccess:  pulumi.Bool(true),
+					Region:        pulumi.String("eu-west-2"),
+				},
+				Name: pulumi.String("davidh-pulumi-eks-cluster-downstream"),
+			})
+		}
+
 		if installFleetClusters {
 
 			// create some EC2 instances to install K3s on:
@@ -395,6 +424,7 @@ func main() {
 
 		// End return
 		return nil
-	})
+	}
+	pulumi.Run(body)
 
 }
