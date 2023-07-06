@@ -24,6 +24,8 @@ func main() {
 		downstreamClusterAMI := conf.Get("downstreamClusterAMI")
 		downstreamClusterNodeCount := conf.GetInt("downstreamClusterNodeCount")
 		installDownstreamEKSCluster := conf.GetBool("installDownstreamEKSCluster")
+		downstreamClusterVersion := conf.Require("downstreamClusterVersion")
+		fleetClusterVersion := conf.Require("fleetClusterVersion")
 
 		cloudcredential, err := rancher2.NewCloudCredential(ctx, "david-pulumi-cloudcredential", &rancher2.CloudCredentialArgs{
 			Name:        pulumi.String("david-pulumi-aws"),
@@ -182,7 +184,7 @@ func main() {
 
 			cluster, err := rancher2.NewClusterV2(ctx, "davidh-pulumi-cluster-downstream", &rancher2.ClusterV2Args{
 				CloudCredentialSecretName:           cloudcredential.ID(),
-				KubernetesVersion:                   pulumi.String("v1.22.13+rke2r1"),
+				KubernetesVersion:                   pulumi.String(downstreamClusterVersion),
 				Name:                                pulumi.String("david-pulumi-downstream"),
 				DefaultClusterRoleForProjectMembers: pulumi.String("user"),
 				RkeConfig: &rancher2.ClusterV2RkeConfigArgs{
@@ -394,7 +396,7 @@ func main() {
 
 				_, err = rancher2.NewClusterV2(ctx, "davidh-pulumi-cluster-"+strconv.Itoa(i), &rancher2.ClusterV2Args{
 					CloudCredentialSecretName:           cloudcredential.ID(),
-					KubernetesVersion:                   pulumi.String("v1.22.13+k3s1"),
+					KubernetesVersion:                   pulumi.String(fleetClusterVersion),
 					Name:                                pulumi.String("david-pulumi-fleet-" + strconv.Itoa(i)),
 					DefaultClusterRoleForProjectMembers: pulumi.String("user"),
 					RkeConfig: &rancher2.ClusterV2RkeConfigArgs{
