@@ -5,4 +5,4 @@ docker:
   enabled: false
 global:
   cattle:
-    url: https://demo-hosted.rancher.cloud/
+    url: https://rancher.susedemo.com/
